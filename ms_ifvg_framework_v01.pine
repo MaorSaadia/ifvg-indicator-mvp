@@ -1,0 +1,158 @@
+//@version=6
+indicator("MS iFVG Framework v0.1", overlay=true, max_labels_count=500, max_lines_count=500)
+
+//------------------------------------------------------------------------------
+// Inputs
+//------------------------------------------------------------------------------
+groupGeneral = "General"
+groupDisplay = "Display"
+groupLiquidity = "Liquidity"
+groupSessions = "Sessions"
+
+displayMode = input.string("Clean", "Display Mode", options=["Clean", "Study"], group=groupGeneral)
+swingLength = input.int(5, "Swing Length", minval=1, group=groupGeneral)
+
+bslColor = input.color(color.new(color.lime, 0), "BSL Marker Color", group=groupDisplay)
+sslColor = input.color(color.new(color.red, 0), "SSL Marker Color", group=groupDisplay)
+markerTextColor = input.color(color.white, "Marker Text Color", group=groupDisplay)
+maxSweepChartTimeframe = input.timeframe("15", "Show Sweeps Through Chart TF", group=groupDisplay)
+
+showLiquiditySweeps = input.bool(true, "Show Liquidity Sweeps", group=groupLiquidity)
+
+showAsiaSession = input.bool(false, "Show Asia High/Low", group=groupSessions)
+asiaSession = input.session("1800-0000", "Asia Session (NY Time)", group=groupSessions)
+asiaColor = input.color(color.new(color.teal, 0), "Asia Line Color", group=groupSessions)
+
+showLondonSession = input.bool(false, "Show London High/Low", group=groupSessions)
+londonSession = input.session("0200-0500", "London Session (NY Time)", group=groupSessions)
+londonColor = input.color(color.new(color.orange, 0), "London Line Color", group=groupSessions)
+
+//------------------------------------------------------------------------------
+// Liquidity engine
+//------------------------------------------------------------------------------
+pivotHigh = ta.pivothigh(high, swingLength, swingLength)
+pivotLow = ta.pivotlow(low, swingLength, swingLength)
+
+var float lastSwingHigh = na
+var float lastSwingLow = na
+var bool lastSwingHighSwept = false
+var bool lastSwingLowSwept = false
+var label latestBslLabel = na
+var label latestSslLabel = na
+
+if not na(pivotHigh)
+    lastSwingHigh := pivotHigh
+    lastSwingHighSwept := false
+
+if not na(pivotLow)
+    lastSwingLow := pivotLow
+    lastSwingLowSwept := false
+
+isCleanMode = displayMode == "Clean"
+showSweepsOnChartTimeframe = timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(maxSweepChartTimeframe)
+bslSweep = showSweepsOnChartTimeframe and showLiquiditySweeps and not na(lastSwingHigh) and not lastSwingHighSwept and high > lastSwingHigh
+sslSweep = showSweepsOnChartTimeframe and showLiquiditySweeps and not na(lastSwingLow) and not lastSwingLowSwept and low < lastSwingLow
+
+if bslSweep
+    lastSwingHighSwept := true
+    if isCleanMode and not na(latestBslLabel)
+        label.delete(latestBslLabel)
+    latestBslLabel := label.new(bar_index, high, "BSL", style=label.style_label_down, color=bslColor, textcolor=markerTextColor, size=size.small)
+
+if sslSweep
+    lastSwingLowSwept := true
+    if isCleanMode and not na(latestSslLabel)
+        label.delete(latestSslLabel)
+    latestSslLabel := label.new(bar_index, low, "SSL", style=label.style_label_up, color=sslColor, textcolor=markerTextColor, size=size.small)
+
+//------------------------------------------------------------------------------
+// Session high/low tracking
+//------------------------------------------------------------------------------
+inAsiaSession = not na(time(timeframe.period, asiaSession, "America/New_York"))
+inLondonSession = not na(time(timeframe.period, londonSession, "America/New_York"))
+
+var float asiaHigh = na
+var float asiaLow = na
+var int asiaStartBar = na
+var line asiaHighLine = na
+var line asiaLowLine = na
+var label asiaHighLabel = na
+var label asiaLowLabel = na
+
+asiaSessionStarted = inAsiaSession and (barstate.isfirst or not inAsiaSession[1])
+asiaSessionActive = inAsiaSession and showAsiaSession
+asiaSessionVisible = showAsiaSession
+
+if asiaSessionStarted
+    asiaHigh := high
+    asiaLow := low
+    asiaStartBar := bar_index
+    if asiaSessionActive
+        if not na(asiaHighLine)
+            line.delete(asiaHighLine)
+        if not na(asiaLowLine)
+            line.delete(asiaLowLine)
+        if not na(asiaHighLabel)
+            label.delete(asiaHighLabel)
+        if not na(asiaLowLabel)
+            label.delete(asiaLowLabel)
+        asiaHighLine := line.new(asiaStartBar, asiaHigh, bar_index, asiaHigh, extend=extend.right, color=asiaColor, width=1)
+        asiaLowLine := line.new(asiaStartBar, asiaLow, bar_index, asiaLow, extend=extend.right, color=asiaColor, width=1)
+        asiaHighLabel := label.new(bar_index, asiaHigh, "Asia High", style=label.style_label_left, color=asiaColor, textcolor=color.white, size=size.small)
+        asiaLowLabel := label.new(bar_index, asiaLow, "Asia Low", style=label.style_label_left, color=asiaColor, textcolor=color.white, size=size.small)
+else if inAsiaSession
+    asiaHigh := math.max(nz(asiaHigh, high), high)
+    asiaLow := math.min(nz(asiaLow, low), low)
+
+if asiaSessionActive and not na(asiaHighLine) and not na(asiaLowLine)
+    line.set_xy1(asiaHighLine, asiaStartBar, asiaHigh)
+    line.set_xy2(asiaHighLine, bar_index, asiaHigh)
+    line.set_xy1(asiaLowLine, asiaStartBar, asiaLow)
+    line.set_xy2(asiaLowLine, bar_index, asiaLow)
+
+if asiaSessionVisible and not na(asiaHighLabel) and not na(asiaLowLabel)
+    label.set_xy(asiaHighLabel, bar_index, asiaHigh)
+    label.set_xy(asiaLowLabel, bar_index, asiaLow)
+
+var float londonHigh = na
+var float londonLow = na
+var int londonStartBar = na
+var line londonHighLine = na
+var line londonLowLine = na
+var label londonHighLabel = na
+var label londonLowLabel = na
+
+londonSessionStarted = inLondonSession and (barstate.isfirst or not inLondonSession[1])
+londonSessionActive = inLondonSession and showLondonSession
+londonSessionVisible = showLondonSession
+
+if londonSessionStarted
+    londonHigh := high
+    londonLow := low
+    londonStartBar := bar_index
+    if londonSessionActive
+        if not na(londonHighLine)
+            line.delete(londonHighLine)
+        if not na(londonLowLine)
+            line.delete(londonLowLine)
+        if not na(londonHighLabel)
+            label.delete(londonHighLabel)
+        if not na(londonLowLabel)
+            label.delete(londonLowLabel)
+        londonHighLine := line.new(londonStartBar, londonHigh, bar_index, londonHigh, extend=extend.right, color=londonColor, width=1)
+        londonLowLine := line.new(londonStartBar, londonLow, bar_index, londonLow, extend=extend.right, color=londonColor, width=1)
+        londonHighLabel := label.new(bar_index, londonHigh, "London High", style=label.style_label_left, color=londonColor, textcolor=color.white, size=size.small)
+        londonLowLabel := label.new(bar_index, londonLow, "London Low", style=label.style_label_left, color=londonColor, textcolor=color.white, size=size.small)
+else if inLondonSession
+    londonHigh := math.max(nz(londonHigh, high), high)
+    londonLow := math.min(nz(londonLow, low), low)
+
+if londonSessionActive and not na(londonHighLine) and not na(londonLowLine)
+    line.set_xy1(londonHighLine, londonStartBar, londonHigh)
+    line.set_xy2(londonHighLine, bar_index, londonHigh)
+    line.set_xy1(londonLowLine, londonStartBar, londonLow)
+    line.set_xy2(londonLowLine, bar_index, londonLow)
+
+if londonSessionVisible and not na(londonHighLabel) and not na(londonLowLabel)
+    label.set_xy(londonHighLabel, bar_index, londonHigh)
+    label.set_xy(londonLowLabel, bar_index, londonLow)
